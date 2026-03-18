@@ -1,0 +1,8 @@
+#!/bin/bash
+
+export NAGIOS_BASE_URL="https://nagios.example.com/nagios/cgi-bin"
+# export NAGIOS_CLIENT_CERT="./client.crt"
+# export NAGIOS_CLIENT_KEY="./client.key"
+# export NAGIOS_CA_CERT="./ca.crt"   # optional
+export NAGIOS_VERIFY_SSL="true"
+export NAGIOS_TIMEOUT="10"
