@@ -159,6 +159,7 @@ async def test_index_lists_available_routes_as_html_table() -> None:
     assert response.media_type == "text/html"
     assert "/static/styles.css" in body
     assert "/static/app.js" in body
+    assert 'class="brand-link" href="/">Nagios Status API<' in body
     assert 'href="/">Home<' in body
     assert 'href="/browse/hosts">Hosts<' in body
     assert 'href="/browse/services">Services<' in body

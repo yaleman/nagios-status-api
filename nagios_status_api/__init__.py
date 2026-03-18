@@ -302,7 +302,7 @@ def html_page(title: str, body: str) -> HTMLResponse:
 </head>
 <body>
   <header class="topbar">
-    <h1>{APP_TITLE}</h1>
+    <h1><a class="brand-link" href="/">{APP_TITLE}</a></h1>
     {nav}
   </header>
   {body}
