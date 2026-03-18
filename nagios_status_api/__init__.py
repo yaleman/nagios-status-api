@@ -212,7 +212,7 @@ def status_text_from_record(query: Optional[str], data: dict[str, Any]) -> str:
     return "unknown"
 
 
-def humanize_status_fields(payload: Any, query: Optional[str]) -> Any:
+def humanize_status_fields(payload: Any, query: Optional[str]) -> dict[str, Any]:
     state_enum = get_state_enum(query)
 
     def transform(value: Any, key_name: Optional[str] = None) -> Any:
@@ -368,7 +368,9 @@ def render_service_status_table(
     if sort_by == "status":
         items.sort(
             key=lambda item: (
-                enum_value_by_name(ServiceListState, item[2]) if item[2] is not None else -1,
+                enum_value_by_name(ServiceListState, item[2])
+                if item[2] is not None
+                else -1,
                 item[0].lower(),
                 item[1].lower(),
             ),
@@ -381,7 +383,7 @@ def render_service_status_table(
 
     rows = "".join(
         "<tr>"
-        f'<td>{html.escape(host_name)}</td>'
+        f"<td>{html.escape(host_name)}</td>"
         f'<td><a href="/browse/services/{quote(host_name, safe="")}/{quote(service_name, safe="")}">{html.escape(service_name)}</a></td>'
         f'<td class="status {html.escape(str(status))}">{html.escape(str(status))}</td>'
         "</tr>"
@@ -417,7 +419,9 @@ def render_host_services_table(host_name: str, services: dict[str, Any]) -> str:
         f'<td><a href="/browse/services/{quote(host_name, safe="")}/{quote(service_name, safe="")}">{html.escape(service_name)}</a></td>'
         f'<td class="status {html.escape(display_status(status))}">{html.escape(display_status(status))}</td>'
         "</tr>"
-        for service_name, status in sorted(services.items(), key=lambda item: item[0].lower())
+        for service_name, status in sorted(
+            services.items(), key=lambda item: item[0].lower()
+        )
     )
     return (
         "<h2>Services</h2>"
@@ -461,6 +465,49 @@ def render_key_value_rows(
     )
 
 
+class ProgramStatusResult(BaseModel):
+    query_time: int
+    cgi: str
+    user: str
+    query: str
+    query_status: str
+    program_start: int
+    last_data_update: int
+    type_code: int
+    type_text: str
+    message: str
+
+
+class ProgramStatusData(BaseModel):
+    programstatus: ProgramStatusInner
+
+
+class ProgramStatusInner(BaseModel):
+    version: str
+    nagios_pid: int
+    daemon_mode: bool
+    program_start: int
+    last_log_rotation: int
+    enable_notifications: bool
+    execute_service_checks: bool
+    accept_passive_service_checks: bool
+    execute_host_checks: bool
+    accept_passive_host_checks: bool
+    enable_event_handlers: bool
+    obsess_over_services: bool
+    obsess_over_hosts: bool
+    check_service_freshness: bool
+    check_host_freshness: bool
+    enable_flap_detection: bool
+    process_performance_data: bool
+
+
+class ProgramStatus(BaseModel):
+    format_version: int
+    result: ProgramStatusResult
+    data: ProgramStatusData
+
+
 class NagiosClient:
     def __init__(self, cfg: Settings):
         self.cfg = cfg
@@ -490,7 +537,7 @@ class NagiosClient:
     def statusjson_url(self) -> str:
         return f"{self.cfg.nagios_base_url.rstrip('/')}/statusjson.cgi"
 
-    async def get_statusjson(self, params: dict[str, str]) -> Any:
+    async def get_statusjson(self, params: dict[str, str]) -> dict[str, Any]:
         url = self.statusjson_url
 
         try:
@@ -510,7 +557,10 @@ class NagiosClient:
 
                 try:
                     payload = await resp.json(content_type=None)
-                    return humanize_status_fields(payload, params.get("query"))
+                    program_status = ProgramStatus.model_validate(payload)
+                    return humanize_status_fields(
+                        program_status.model_dump(), params.get("query")
+                    )
                 except Exception as exc:
                     raise HTTPException(
                         status_code=502,
@@ -532,8 +582,8 @@ class NagiosClient:
                 },
             ) from exc
 
-    async def check_backend(self) -> None:
-        await self.get_statusjson({"query": "programstatus"})
+    async def check_backend(self) -> dict[str, Any]:
+        return await self.get_statusjson({"query": "programstatus"})
 
 
 def format_startup_error(exc: Exception, nagios: NagiosClient) -> str:
@@ -684,7 +734,6 @@ async def index(
 </head>
 <body>
   <h1>Nagios Status API</h1>
-  <p>Available endpoints:</p>
   <table>
     <thead>
       <tr>
@@ -768,14 +817,12 @@ async def browse_service(
     )
     service_data = payload.get("data", {}).get("service", {})
     status_text = status_text_from_record("service", service_data)
-    service_path = (
-        f"/browse/services/{quote(host_name, safe='')}/{quote(service_description, safe='')}"
-    )
+    service_path = f"/browse/services/{quote(host_name, safe='')}/{quote(service_description, safe='')}"
     body = (
         f"<h1>{html.escape(service_description)}</h1>"
         f'<p>Host: <a href="/browse/hosts/{quote(host_name, safe="")}">{html.escape(host_name)}</a></p>'
         '<p><a href="/browse/services">Back to services</a></p>'
-        f"<p>Status: <span class=\"status {html.escape(str(status_text))}\">{html.escape(str(status_text))}</span></p>"
+        f'<p>Status: <span class="status {html.escape(str(status_text))}">{html.escape(str(status_text))}</span></p>'
         f"{render_key_value_rows(service_data, sort, dir, service_path)}"
         f"<details><summary>Raw JSON</summary><pre>{html.escape(json.dumps(payload, indent=2, sort_keys=True))}</pre></details>"
     )
@@ -784,6 +831,12 @@ async def browse_service(
 
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
+
+    nagios: NagiosClient = app.state.nagios
+    try:
+        await nagios.check_backend()
+    except Exception:
+        return {"status": "error"}
     return {"status": "ok"}
 
 

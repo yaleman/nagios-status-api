@@ -20,4 +20,8 @@ nagios-status-api = "nagios_status_api:main"
 nagios-status-api-server = "nagios_status_api:serve"
 
 [dependency-groups]
-dev = ["pytest>=9.0.2", "ruff>=0.15.6", "ty>=0.0.23"]
+dev = [
+    "pytest>=9.0.2",
+    "ruff>=0.15.6",
+    "ty>=0.0.23",
+]

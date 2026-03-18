@@ -25,7 +25,9 @@ from nagios_status_api import (
 
 
 @pytest.mark.anyio
-async def test_lifespan_checks_backend_on_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_lifespan_checks_backend_on_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     events: list[str] = []
 
     async def fake_start(self) -> None:
@@ -38,7 +40,9 @@ async def test_lifespan_checks_backend_on_startup(monkeypatch: pytest.MonkeyPatc
         events.append("close")
 
     monkeypatch.setattr("nagios_status_api.NagiosClient.start", fake_start)
-    monkeypatch.setattr("nagios_status_api.NagiosClient.check_backend", fake_check_backend)
+    monkeypatch.setattr(
+        "nagios_status_api.NagiosClient.check_backend", fake_check_backend
+    )
     monkeypatch.setattr("nagios_status_api.NagiosClient.close", fake_close)
 
     async with lifespan(app):
@@ -71,7 +75,9 @@ async def test_lifespan_closes_client_when_startup_check_fails(
         events.append("close")
 
     monkeypatch.setattr("nagios_status_api.NagiosClient.start", fake_start)
-    monkeypatch.setattr("nagios_status_api.NagiosClient.check_backend", fake_check_backend)
+    monkeypatch.setattr(
+        "nagios_status_api.NagiosClient.check_backend", fake_check_backend
+    )
     monkeypatch.setattr("nagios_status_api.NagiosClient.close", fake_close)
 
     with pytest.raises(
@@ -103,18 +109,18 @@ async def test_get_statusjson_connection_error_includes_backend_url() -> None:
     with pytest.raises(HTTPException) as exc_info:
         await client.get_statusjson({"query": "programstatus"})
 
-    assert exc_info.value.detail["backend_url"] == client.statusjson_url
+    assert exc_info.value.detail["backend_url"] == client.statusjson_url  # ty:ignore[invalid-argument-type]
 
 
 @pytest.mark.anyio
 async def test_index_lists_available_routes_as_html_table() -> None:
     response = await index()
-    body = response.body.decode()
+    body = str(response.body)
 
     assert response.media_type == "text/html"
     assert "<table>" in body
-    assert '/static/styles.css' in body
-    assert '/static/app.js' in body
+    assert "/static/styles.css" in body
+    assert "/static/app.js" in body
     assert "/?sort=path&amp;dir=asc" in body or "/?sort=path&dir=asc" in body
     assert "/browse/hosts" in body
     assert "/browse/services" in body
@@ -140,12 +146,18 @@ async def test_browse_hosts_lists_links(monkeypatch: pytest.MonkeyPatch) -> None
     app.state.nagios = FakeNagios()
 
     response = await browse_hosts()
-    body = response.body.decode()
+    body = str(response.body)
 
     assert "/browse/hosts/db01" in body
     assert "/browse/hosts/db%2002" in body
-    assert "/browse/hosts?sort=host&amp;dir=asc" in body or "/browse/hosts?sort=host&dir=asc" in body
-    assert "/browse/hosts?sort=status&amp;dir=desc" in body or "/browse/hosts?sort=status&dir=desc" in body
+    assert (
+        "/browse/hosts?sort=host&amp;dir=asc" in body
+        or "/browse/hosts?sort=host&dir=asc" in body
+    )
+    assert (
+        "/browse/hosts?sort=status&amp;dir=desc" in body
+        or "/browse/hosts?sort=status&dir=desc" in body
+    )
     assert ">up<" in body
     assert ">down<" in body
 
@@ -168,7 +180,7 @@ async def test_browse_hosts_sorts_status_by_raw_value() -> None:
     app.state.nagios = FakeNagios()
 
     response = await browse_hosts(sort="status", dir="asc")
-    body = response.body.decode()
+    body = str(response.body)
 
     assert body.index("pending-host") < body.index("up-host")
     assert body.index("up-host") < body.index("down-host")
@@ -194,11 +206,14 @@ async def test_browse_services_lists_links() -> None:
     app.state.nagios = FakeNagios()
 
     response = await browse_services()
-    body = response.body.decode()
+    body = str(response.body)
 
     assert "/browse/services/db01/Disk%20Space" in body
     assert "/browse/services/db01/PING" in body
-    assert "/browse/services?sort=status&amp;dir=desc" in body or "/browse/services?sort=status&dir=desc" in body
+    assert (
+        "/browse/services?sort=status&amp;dir=desc" in body
+        or "/browse/services?sort=status&dir=desc" in body
+    )
     assert ">warning<" in body
     assert ">ok<" in body
 
@@ -223,7 +238,7 @@ async def test_browse_services_sorts_status_by_raw_value() -> None:
     app.state.nagios = FakeNagios()
 
     response = await browse_services(sort="status", dir="asc")
-    body = response.body.decode()
+    body = str(response.body)
 
     assert body.index("svc-ok") < body.index("svc-warning")
     assert body.index("svc-warning") < body.index("svc-critical")
@@ -263,19 +278,22 @@ async def test_browse_host_renders_status_page(monkeypatch: pytest.MonkeyPatch) 
     app.state.nagios = FakeNagios()
 
     response = await browse_host("db01")
-    body = response.body.decode()
+    body = str(response.body)
 
     assert "db01" in body
     assert "Status:" in body
-    assert "/browse/hosts/db01?sort=field&amp;dir=asc" in body or "/browse/hosts/db01?sort=field&dir=asc" in body
+    assert (
+        "/browse/hosts/db01?sort=field&amp;dir=asc" in body
+        or "/browse/hosts/db01?sort=field&dir=asc" in body
+    )
     assert "/browse/services/db01/Disk%20Space" in body
     assert ">warning<" in body
     assert ">ok<" in body
     assert ">up<" in body
     assert "PING OK" in body
     assert "<details><summary>Raw JSON</summary>" in body
-    assert '/static/styles.css' in body
-    assert '/static/app.js' in body
+    assert "/static/styles.css" in body
+    assert "/static/app.js" in body
     assert seen_params == [
         {"query": "host", "hostname": "db01"},
         {"query": "servicelist", "hostname": "db01"},
@@ -305,7 +323,7 @@ async def test_browse_host_falls_back_to_raw_status_value() -> None:
     app.state.nagios = FakeNagios()
 
     response = await browse_host("apache.housenet.yaleman.org")
-    body = response.body.decode()
+    body = str(response.body)
 
     assert "Status:" in body
     assert ">up<" in body
@@ -340,7 +358,7 @@ async def test_browse_host_renders_service_rows_with_text_status() -> None:
     app.state.nagios = FakeNagios()
 
     response = await browse_host("db01")
-    body = response.body.decode()
+    body = str(response.body)
 
     assert "/browse/services/db01/Disk%20Space" in body
     assert "/browse/services/db01/PING" in body
@@ -390,11 +408,14 @@ async def test_browse_service_renders_status_page() -> None:
     app.state.nagios = FakeNagios()
 
     response = await browse_service("db01", "Disk Space")
-    body = response.body.decode()
+    body = str(response.body)
 
     assert "Disk Space" in body
-    assert '/browse/hosts/db01' in body
-    assert "/browse/services/db01/Disk%20Space?sort=field&amp;dir=asc" in body or "/browse/services/db01/Disk%20Space?sort=field&dir=asc" in body
+    assert "/browse/hosts/db01" in body
+    assert (
+        "/browse/services/db01/Disk%20Space?sort=field&amp;dir=asc" in body
+        or "/browse/services/db01/Disk%20Space?sort=field&dir=asc" in body
+    )
     assert ">warning<" in body
     assert "DISK WARNING" in body
     assert "<details><summary>Raw JSON</summary>" in body

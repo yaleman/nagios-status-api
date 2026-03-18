@@ -3,15 +3,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import aiohttp
 import pytest
 from fastapi import HTTPException
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from nagios_status_api import (
-    NagiosClient,
-    Settings,
     app,
     build_parser,
     command_to_params,
@@ -45,7 +42,9 @@ def test_command_to_params_maps_commands() -> None:
     }
 
 
-def test_main_prints_json(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_prints_json(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     async def fake_run_cli(args) -> int:
         assert args.command == "hosts"
         print('{\n  "ok": true\n}')
@@ -85,7 +84,9 @@ async def test_run_cli_prints_concise_error(
 
     monkeypatch.setattr("nagios_status_api.NagiosClient.start", fake_start)
     monkeypatch.setattr("nagios_status_api.NagiosClient.close", fake_close)
-    monkeypatch.setattr("nagios_status_api.NagiosClient.get_statusjson", fake_get_statusjson)
+    monkeypatch.setattr(
+        "nagios_status_api.NagiosClient.get_statusjson", fake_get_statusjson
+    )
 
     exit_code = await run_cli(args)
 
@@ -118,5 +119,10 @@ def test_serve_runs_uvicorn_with_defaults(monkeypatch: pytest.MonkeyPatch) -> No
     assert reload_exit_code == 0
     assert calls == [
         {"app": app, "host": "0.0.0.0", "port": 8000, "reload": False},
-        {"app": "nagios_status_api:app", "host": "0.0.0.0", "port": 8000, "reload": True},
+        {
+            "app": "nagios_status_api:app",
+            "host": "0.0.0.0",
+            "port": 8000,
+            "reload": True,
+        },
     ]
