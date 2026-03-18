@@ -9,6 +9,7 @@ from fastapi import HTTPException
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from nagios_status_api import (
+    StartupConfigurationError,
     app,
     build_parser,
     command_to_params,
@@ -100,6 +101,9 @@ async def test_run_cli_prints_concise_error(
 def test_serve_runs_uvicorn_with_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
 
+    async def fake_startup_checks(cfg) -> None:
+        return None
+
     def fake_run(target_app, host: str, port: int, reload: bool) -> None:
         calls.append(
             {
@@ -110,6 +114,7 @@ def test_serve_runs_uvicorn_with_defaults(monkeypatch: pytest.MonkeyPatch) -> No
             }
         )
 
+    monkeypatch.setattr("nagios_status_api.run_startup_checks", fake_startup_checks)
     monkeypatch.setattr("nagios_status_api.uvicorn.run", fake_run)
 
     exit_code = serve([])
@@ -126,3 +131,23 @@ def test_serve_runs_uvicorn_with_defaults(monkeypatch: pytest.MonkeyPatch) -> No
             "reload": True,
         },
     ]
+
+
+def test_serve_prints_clean_startup_error(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    async def fake_startup_checks(cfg) -> None:
+        raise StartupConfigurationError(
+            "Startup failed: NAGIOS_BASE_URL is still set to the example hostname nagios.example.com."
+        )
+
+    monkeypatch.setattr("nagios_status_api.run_startup_checks", fake_startup_checks)
+
+    exit_code = serve([])
+
+    assert exit_code == 1
+    assert (
+        capsys.readouterr().err.strip()
+        == "Startup failed: NAGIOS_BASE_URL is still set to the example hostname nagios.example.com."
+    )

@@ -10,7 +10,7 @@ import os
 import ssl
 import sys
 from pathlib import Path
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
@@ -124,6 +124,24 @@ class Settings(BaseModel):
 
 
 settings = Settings()
+
+
+class StartupConfigurationError(RuntimeError):
+    pass
+
+
+def validate_backend_settings(cfg: Settings) -> None:
+    parsed = urlparse(cfg.nagios_base_url)
+
+    if not parsed.hostname:
+        raise StartupConfigurationError(
+            "Startup failed: NAGIOS_BASE_URL must include a real backend hostname."
+        )
+
+    if parsed.hostname == "nagios.example.com":
+        raise StartupConfigurationError(
+            "Startup failed: NAGIOS_BASE_URL is still set to the example hostname nagios.example.com."
+        )
 
 
 def build_ssl_context(cfg: Settings) -> ssl.SSLContext:
@@ -682,15 +700,27 @@ class NagiosClient:
 
 
 def format_startup_error(exc: Exception, nagios: NagiosClient) -> str:
+    if isinstance(exc, StartupConfigurationError):
+        return str(exc)
     if isinstance(exc, HTTPException) and isinstance(exc.detail, dict):
         message = exc.detail.get("message", "Nagios startup check failed")
         backend_url = exc.detail.get("backend_url", nagios.statusjson_url)
         error = exc.detail.get("error")
         if error:
-            return f"{message}: {backend_url} ({error})"
-        return f"{message}: {backend_url}"
+            return f"Startup failed: {message}: {backend_url} ({error})"
+        return f"Startup failed: {message}: {backend_url}"
 
-    return f"Nagios startup check failed: {nagios.statusjson_url} ({exc})"
+    return f"Startup failed: {nagios.statusjson_url} ({exc})"
+
+
+async def run_startup_checks(cfg: Settings) -> None:
+    validate_backend_settings(cfg)
+    nagios = NagiosClient(cfg)
+    try:
+        await nagios.start()
+        await nagios.check_backend()
+    finally:
+        await nagios.close()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -775,6 +805,11 @@ def serve(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--reload", action="store_true")
     args = parser.parse_args(argv)
+    try:
+        asyncio.run(run_startup_checks(settings))
+    except Exception as exc:
+        print(format_startup_error(exc, NagiosClient(settings)), file=sys.stderr)
+        return 1
     target = "nagios_status_api:app" if args.reload else app
     uvicorn.run(target, host=args.host, port=args.port, reload=args.reload)
     return 0
@@ -784,6 +819,7 @@ def serve(argv: Optional[list[str]] = None) -> int:
 async def lifespan(app: FastAPI):
     nagios = NagiosClient(settings)
     try:
+        validate_backend_settings(settings)
         await nagios.start()
         await nagios.check_backend()
         app.state.nagios = nagios

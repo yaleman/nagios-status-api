@@ -39,6 +39,7 @@ async def test_lifespan_checks_backend_on_startup(
     async def fake_close(self) -> None:
         events.append("close")
 
+    monkeypatch.setattr("nagios_status_api.validate_backend_settings", lambda cfg: None)
     monkeypatch.setattr("nagios_status_api.NagiosClient.start", fake_start)
     monkeypatch.setattr(
         "nagios_status_api.NagiosClient.check_backend", fake_check_backend
@@ -74,6 +75,7 @@ async def test_lifespan_closes_client_when_startup_check_fails(
     async def fake_close(self) -> None:
         events.append("close")
 
+    monkeypatch.setattr("nagios_status_api.validate_backend_settings", lambda cfg: None)
     monkeypatch.setattr("nagios_status_api.NagiosClient.start", fake_start)
     monkeypatch.setattr(
         "nagios_status_api.NagiosClient.check_backend", fake_check_backend
@@ -82,7 +84,7 @@ async def test_lifespan_closes_client_when_startup_check_fails(
 
     with pytest.raises(
         RuntimeError,
-        match="Failed to connect to Nagios backend: https://nagios.example.com/nagios/cgi-bin/statusjson.cgi \\(backend unavailable\\)",
+        match="Startup failed: Failed to connect to Nagios backend: https://nagios.example.com/nagios/cgi-bin/statusjson.cgi \\(backend unavailable\\)",
     ):
         async with lifespan(app):
             pytest.fail("lifespan should not yield when backend check fails")
