@@ -97,16 +97,26 @@ async def test_run_cli_prints_concise_error(
 
 
 def test_serve_runs_uvicorn_with_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    recorded: dict[str, object] = {}
+    calls: list[dict[str, object]] = []
 
-    def fake_run(target_app, host: str, port: int) -> None:
-        recorded["app"] = target_app
-        recorded["host"] = host
-        recorded["port"] = port
+    def fake_run(target_app, host: str, port: int, reload: bool) -> None:
+        calls.append(
+            {
+                "app": target_app,
+                "host": host,
+                "port": port,
+                "reload": reload,
+            }
+        )
 
     monkeypatch.setattr("nagios_status_api.uvicorn.run", fake_run)
 
     exit_code = serve([])
+    reload_exit_code = serve(["--reload"])
 
     assert exit_code == 0
-    assert recorded == {"app": app, "host": "0.0.0.0", "port": 8000}
+    assert reload_exit_code == 0
+    assert calls == [
+        {"app": app, "host": "0.0.0.0", "port": 8000, "reload": False},
+        {"app": "nagios_status_api:app", "host": "0.0.0.0", "port": 8000, "reload": True},
+    ]
