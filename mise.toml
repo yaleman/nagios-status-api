@@ -4,3 +4,15 @@ uv = "latest"
 
 [tasks.start]
 run = "uv run nagios-status-api-server --reload"
+
+[tasks.test]
+run = "uv run pytest"
+
+[tasks.ty]
+run = "uv run ty check"
+
+[tasks.ruff]
+run = "uv run ruff check"
+
+[tasks.check]
+depends = ["test", "ty", "ruff"]
