@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
 
 import aiohttp
 import pytest
@@ -13,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from nagios_status_api import (
     NagiosClient,
     Settings,
+    StatusJson,
     app,
     browse_host,
     browse_hosts,
@@ -132,16 +132,20 @@ async def test_index_lists_available_routes_as_html_table() -> None:
 @pytest.mark.anyio
 async def test_browse_hosts_lists_links(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeNagios:
-        async def get_statusjson(self, params: dict[str, str]) -> dict[str, Any]:
+        async def get_statusjson(self, params: dict[str, str]) -> StatusJson:
             assert params == {"query": "hostlist"}
-            return {
-                "data": {
-                    "hostlist": {
-                        "db01": "up",
-                        "db 02": "down",
-                    }
+            return StatusJson.model_validate(
+                {
+                    "format_version": "1.0",
+                    "data": {
+                        "hostlist": {
+                            "db01": "up",
+                            "db 02": "down",
+                        }
+                    },
+                    "result": None,
                 }
-            }
+            )
 
     app.state.nagios = FakeNagios()
 
@@ -165,17 +169,21 @@ async def test_browse_hosts_lists_links(monkeypatch: pytest.MonkeyPatch) -> None
 @pytest.mark.anyio
 async def test_browse_hosts_sorts_status_by_raw_value() -> None:
     class FakeNagios:
-        async def get_statusjson(self, params: dict[str, str]) -> dict[str, Any]:
-            return {
-                "data": {
-                    "hostlist": {
-                        "pending-host": "pending",
-                        "up-host": "up",
-                        "down-host": "down",
-                        "unreachable-host": "unreachable",
-                    }
+        async def get_statusjson(self, params: dict[str, str]) -> StatusJson:
+            return StatusJson.model_validate(
+                {
+                    "format_version": "1.0",
+                    "data": {
+                        "hostlist": {
+                            "pending-host": "pending",
+                            "up-host": "up",
+                            "down-host": "down",
+                            "unreachable-host": "unreachable",
+                        }
+                    },
+                    "result": None,
                 }
-            }
+            )
 
     app.state.nagios = FakeNagios()
 
@@ -190,18 +198,22 @@ async def test_browse_hosts_sorts_status_by_raw_value() -> None:
 @pytest.mark.anyio
 async def test_browse_services_lists_links() -> None:
     class FakeNagios:
-        async def get_statusjson(self, params: dict[str, str]) -> dict[str, Any]:
+        async def get_statusjson(self, params: dict[str, str]) -> StatusJson:
             assert params == {"query": "servicelist"}
-            return {
-                "data": {
-                    "servicelist": {
-                        "db01": {
-                            "Disk Space": "warning",
-                            "PING": "ok",
+            return StatusJson.model_validate(
+                {
+                    "format_version": "1.0",
+                    "data": {
+                        "servicelist": {
+                            "db01": {
+                                "Disk Space": "warning",
+                                "PING": "ok",
+                            }
                         }
-                    }
+                    },
+                    "result": None,
                 }
-            }
+            )
 
     app.state.nagios = FakeNagios()
 
@@ -221,19 +233,23 @@ async def test_browse_services_lists_links() -> None:
 @pytest.mark.anyio
 async def test_browse_services_sorts_status_by_raw_value() -> None:
     class FakeNagios:
-        async def get_statusjson(self, params: dict[str, str]) -> dict[str, Any]:
-            return {
-                "data": {
-                    "servicelist": {
-                        "db01": {
-                            "svc-ok": "ok",
-                            "svc-warning": "warning",
-                            "svc-critical": "critical",
-                            "svc-unknown": "unknown",
-                        }
-                    }
+        async def get_statusjson(self, params: dict[str, str]) -> StatusJson:
+            return StatusJson.model_validate(
+                {
+                    "format_version": "1.0",
+                    "data": {
+                        "servicelist": {
+                            "db01": {
+                                "svc-ok": "ok",
+                                "svc-warning": "warning",
+                                "svc-critical": "critical",
+                                "svc-unknown": "unknown",
+                            }
+                        },
+                    },
+                    "result": None,
                 }
-            }
+            )
 
     app.state.nagios = FakeNagios()
 
@@ -251,29 +267,37 @@ async def test_browse_host_renders_status_page(monkeypatch: pytest.MonkeyPatch) 
     seen_params: list[dict[str, str]] = []
 
     class FakeNagios:
-        async def get_statusjson(self, params: dict[str, str]) -> dict[str, Any]:
+        async def get_statusjson(self, params: dict[str, str]) -> StatusJson:
             seen_params.append(params)
             if params == {"query": "host", "hostname": "db01"}:
-                return {
-                    "data": {
-                        "host": {
-                            "host_name": "db01",
-                            "current_state": 0,
-                            "current_state_text": "up",
-                            "plugin_output": "PING OK",
-                        }
+                return StatusJson.model_validate(
+                    {
+                        "result": None,
+                        "format_version": "1.0",
+                        "data": {
+                            "host": {
+                                "host_name": "db01",
+                                "current_state": 0,
+                                "current_state_text": "up",
+                                "plugin_output": "PING OK",
+                            }
+                        },
                     }
-                }
+                )
 
             assert params == {"query": "servicelist", "hostname": "db01"}
-            return {
-                "data": {
-                    "servicelist": {
-                        "Disk Space": "warning",
-                        "PING": "ok",
-                    }
+            return StatusJson.model_validate(
+                {
+                    "result": None,
+                    "format_version": "1.0",
+                    "data": {
+                        "servicelist": {
+                            "Disk Space": "warning",
+                            "PING": "ok",
+                        }
+                    },
                 }
-            }
+            )
 
     app.state.nagios = FakeNagios()
 
@@ -303,22 +327,28 @@ async def test_browse_host_renders_status_page(monkeypatch: pytest.MonkeyPatch) 
 @pytest.mark.anyio
 async def test_browse_host_falls_back_to_raw_status_value() -> None:
     class FakeNagios:
-        async def get_statusjson(self, params: dict[str, str]) -> dict[str, Any]:
+        async def get_statusjson(self, params: dict[str, str]) -> StatusJson:
             if params == {"query": "host", "hostname": "apache.housenet.yaleman.org"}:
-                return {
-                    "data": {
-                        "host": {
-                            "host_name": "apache.housenet.yaleman.org",
-                            "current_state": 2,
-                        }
+                return StatusJson.model_validate(
+                    {
+                        "result": None,
+                        "format_version": "1.0",
+                        "data": {
+                            "host": {
+                                "host_name": "apache.housenet.yaleman.org",
+                                "current_state": 2,
+                            }
+                        },
                     }
-                }
+                )
 
             assert params == {
                 "query": "servicelist",
                 "hostname": "apache.housenet.yaleman.org",
             }
-            return {"data": {"servicelist": {}}}
+            return StatusJson.model_validate(
+                {"result": None, "format_version": "1.0", "data": {"servicelist": {}}}
+            )
 
     app.state.nagios = FakeNagios()
 
@@ -332,28 +362,36 @@ async def test_browse_host_falls_back_to_raw_status_value() -> None:
 @pytest.mark.anyio
 async def test_browse_host_renders_service_rows_with_text_status() -> None:
     class FakeNagios:
-        async def get_statusjson(self, params: dict[str, str]) -> dict[str, Any]:
+        async def get_statusjson(self, params: dict[str, str]) -> StatusJson:
             if params == {"query": "host", "hostname": "db01"}:
-                return {
-                    "data": {
-                        "host": {
-                            "host_name": "db01",
-                            "current_state": 2,
-                        }
+                return StatusJson.model_validate(
+                    {
+                        "result": None,
+                        "format_version": "1.0",
+                        "data": {
+                            "host": {
+                                "host_name": "db01",
+                                "current_state": 2,
+                            }
+                        },
                     }
-                }
+                )
 
             assert params == {"query": "servicelist", "hostname": "db01"}
-            return {
-                "data": {
-                    "servicelist": {
-                        "db01": {
-                            "Disk Space": 4,
-                            "PING": 2,
+            return StatusJson.model_validate(
+                {
+                    "result": None,
+                    "format_version": "1.0",
+                    "data": {
+                        "servicelist": {
+                            "db01": {
+                                "Disk Space": 4,
+                                "PING": 2,
+                            }
                         }
-                    }
+                    },
                 }
-            }
+            )
 
     app.state.nagios = FakeNagios()
 
@@ -387,23 +425,27 @@ def test_humanize_status_fields_for_nested_service_list_payload() -> None:
 @pytest.mark.anyio
 async def test_browse_service_renders_status_page() -> None:
     class FakeNagios:
-        async def get_statusjson(self, params: dict[str, str]) -> dict[str, Any]:
+        async def get_statusjson(self, params: dict[str, str]) -> StatusJson:
             assert params == {
                 "query": "service",
                 "hostname": "db01",
                 "servicedescription": "Disk Space",
             }
-            return {
-                "data": {
-                    "service": {
-                        "host_name": "db01",
-                        "service_description": "Disk Space",
-                        "current_state": 1,
-                        "current_state_text": "warning",
-                        "plugin_output": "DISK WARNING",
-                    }
+            return StatusJson.model_validate(
+                {
+                    "format_version": "1.0",
+                    "result": None,
+                    "data": {
+                        "service": {
+                            "host_name": "db01",
+                            "service_description": "Disk Space",
+                            "current_state": 1,
+                            "current_state_text": "warning",
+                            "plugin_output": "DISK WARNING",
+                        }
+                    },
                 }
-            }
+            )
 
     app.state.nagios = FakeNagios()
 

@@ -212,7 +212,9 @@ def status_text_from_record(query: Optional[str], data: dict[str, Any]) -> str:
     return "unknown"
 
 
-def humanize_status_fields(payload: Any, query: Optional[str]) -> dict[str, Any]:
+def humanize_status_fields(
+    payload: dict[str, Any], query: Optional[str]
+) -> dict[str, Any]:
     state_enum = get_state_enum(query)
 
     def transform(value: Any, key_name: Optional[str] = None) -> Any:
@@ -502,10 +504,10 @@ class ProgramStatusInner(BaseModel):
     process_performance_data: bool
 
 
-class ProgramStatus(BaseModel):
+class StatusJson(BaseModel):
     format_version: int
-    result: ProgramStatusResult
-    data: ProgramStatusData
+    result: Optional[ProgramStatusResult]
+    data: ProgramStatusData | Any
 
 
 class NagiosClient:
@@ -537,7 +539,8 @@ class NagiosClient:
     def statusjson_url(self) -> str:
         return f"{self.cfg.nagios_base_url.rstrip('/')}/statusjson.cgi"
 
-    async def get_statusjson(self, params: dict[str, str]) -> dict[str, Any]:
+    async def get_statusjson(self, params: dict[str, str]) -> StatusJson:
+        """fetch data from Nagios statusjson.cgi and handle errors with concise messages"""
         url = self.statusjson_url
 
         try:
@@ -557,9 +560,10 @@ class NagiosClient:
 
                 try:
                     payload = await resp.json(content_type=None)
-                    program_status = ProgramStatus.model_validate(payload)
-                    return humanize_status_fields(
-                        program_status.model_dump(), params.get("query")
+                    # try and parse it
+                    StatusJson.model_validate(payload)
+                    return StatusJson.model_validate(
+                        humanize_status_fields(payload, params.get("query"))
                     )
                 except Exception as exc:
                     raise HTTPException(
@@ -582,7 +586,7 @@ class NagiosClient:
                 },
             ) from exc
 
-    async def check_backend(self) -> dict[str, Any]:
+    async def check_backend(self) -> StatusJson:
         return await self.get_statusjson({"query": "programstatus"})
 
 
@@ -647,7 +651,7 @@ async def run_cli(args: argparse.Namespace) -> int:
     try:
         await nagios.start()
         result = await nagios.get_statusjson(command_to_params(args))
-        print(json.dumps(result, indent=2, sort_keys=True))
+        print(result.model_dump_json(indent=2))
         return 0
     except HTTPException as exc:
         detail = (
@@ -756,7 +760,7 @@ async def browse_hosts(
 ) -> HTMLResponse:
     nagios: NagiosClient = app.state.nagios
     payload = await nagios.get_statusjson({"query": "hostlist"})
-    hostlist = payload.get("data", {}).get("hostlist", {})
+    hostlist = payload.data.get("hostlist", {})
     return html_page("Hosts", render_host_status_table(hostlist, sort, dir))
 
 
@@ -771,8 +775,8 @@ async def browse_host(
     services_payload = await nagios.get_statusjson(
         {"query": "servicelist", "hostname": host_name}
     )
-    host_data = payload.get("data", {}).get("host", {})
-    host_services = services_payload.get("data", {}).get("servicelist", {})
+    host_data = payload.data.get("host", {})
+    host_services = services_payload.data.get("servicelist", {})
     status_text = status_text_from_record("host", host_data)
     host_path = f"/browse/hosts/{quote(host_name, safe='')}"
     body = (
@@ -781,7 +785,7 @@ async def browse_host(
         f'<p>Status: <span class="status {html.escape(str(status_text))}">{html.escape(str(status_text))}</span></p>'
         f"{render_key_value_rows(host_data, sort, dir, host_path)}"
         f"{render_host_services_table(host_name, host_services)}"
-        f"<details><summary>Raw JSON</summary><pre>{html.escape(json.dumps(payload, indent=2, sort_keys=True))}</pre></details>"
+        f"<details><summary>Raw JSON</summary><pre>{html.escape(payload.model_dump_json(indent=2))}</pre></details>"
     )
     return html_page(f"Host {host_name}", body)
 
@@ -793,7 +797,7 @@ async def browse_services(
 ) -> HTMLResponse:
     nagios: NagiosClient = app.state.nagios
     payload = await nagios.get_statusjson({"query": "servicelist"})
-    servicelist = payload.get("data", {}).get("servicelist", {})
+    servicelist = payload.data.get("servicelist", {})
     return html_page("Services", render_service_status_table(servicelist, sort, dir))
 
 
@@ -808,14 +812,14 @@ async def browse_service(
     dir: str = Query(default="asc"),
 ) -> HTMLResponse:
     nagios: NagiosClient = app.state.nagios
-    payload = await nagios.get_statusjson(
+    payload: StatusJson = await nagios.get_statusjson(
         {
             "query": "service",
             "hostname": host_name,
             "servicedescription": service_description,
         }
     )
-    service_data = payload.get("data", {}).get("service", {})
+    service_data = payload.data.get("service", {})
     status_text = status_text_from_record("service", service_data)
     service_path = f"/browse/services/{quote(host_name, safe='')}/{quote(service_description, safe='')}"
     body = (
@@ -824,7 +828,7 @@ async def browse_service(
         '<p><a href="/browse/services">Back to services</a></p>'
         f'<p>Status: <span class="status {html.escape(str(status_text))}">{html.escape(str(status_text))}</span></p>'
         f"{render_key_value_rows(service_data, sort, dir, service_path)}"
-        f"<details><summary>Raw JSON</summary><pre>{html.escape(json.dumps(payload, indent=2, sort_keys=True))}</pre></details>"
+        f"<details><summary>Raw JSON</summary><pre>{html.escape(payload.model_dump_json(indent=2))}</pre></details>"
     )
     return html_page(f"Service {service_description}", body)
 

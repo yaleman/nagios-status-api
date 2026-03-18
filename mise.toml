@@ -1,5 +1,6 @@
 [tools]
+python = "3.14"
 uv = "latest"
 
 [tasks.start]
-run = "uv run uvicorn nagios_status_api.__init__:app --host 0.0.0.0 --port 8000 --reload"
+run = "uv run nagios-status-api-server --reload"
