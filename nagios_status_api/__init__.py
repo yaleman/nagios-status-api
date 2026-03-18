@@ -24,23 +24,17 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).with_name("static")
+APP_TITLE = "Nagios Status API"
 
 INDEX_ROUTES = [
     ("/healthz", "Health check"),
+    ("/docs", "FastAPI OpenAPI docs"),
     ("/browse/hosts", "Browse hosts as an HTML table"),
     ("/browse/hosts/{host_name}", "Browse one host as an HTML status page"),
     ("/browse/services", "Browse services as an HTML table"),
     (
         "/browse/services/{host_name}/{service_description}",
         "Browse one service as an HTML status page",
-    ),
-    ("/api/v1/programstatus", "Nagios program status"),
-    ("/api/v1/hosts", "List all hosts"),
-    ("/api/v1/hosts/{host_name}", "Fetch one host by host name"),
-    ("/api/v1/services", "List all services or filter with ?host_name="),
-    (
-        "/api/v1/services/{host_name}/{service_description}",
-        "Fetch one service by host name and service description",
     ),
 ]
 
@@ -272,6 +266,15 @@ def humanize_status_fields(
 
 def html_page(title: str, body: str) -> HTMLResponse:
     safe_title = html.escape(title)
+    nav = (
+        '<nav class="topnav">'
+        '<a href="/">Home</a>'
+        '<a href="/browse/hosts">Hosts</a>'
+        '<a href="/browse/services">Services</a>'
+        '<a href="/docs">Docs</a>'
+        '<a href="/healthz">Healthz</a>'
+        "</nav>"
+    )
     content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -280,6 +283,10 @@ def html_page(title: str, body: str) -> HTMLResponse:
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
+  <header class="topbar">
+    <h1>{APP_TITLE}</h1>
+    {nav}
+  </header>
   {body}
   <script src="/static/app.js"></script>
 </body>
@@ -431,6 +438,90 @@ def render_host_services_table(host_name: str, services: dict[str, Any]) -> str:
         "<thead><tr><th>Service</th><th>Status</th></tr></thead>"
         f"<tbody>{rows}</tbody>"
         "</table>"
+    )
+
+
+def render_dashboard_host_issues(hosts: dict[str, Any]) -> str:
+    issues = [
+        (host_name, status)
+        for host_name, status in sorted(hosts.items(), key=lambda item: item[0].lower())
+        if str(status).lower() != "up"
+    ]
+
+    if not issues:
+        return ""
+
+    rows = "".join(
+        "<tr>"
+        f'<td><a href="/browse/hosts/{quote(host_name, safe="")}">{html.escape(host_name)}</a></td>'
+        f'<td class="status {html.escape(str(status).lower())}">{html.escape(str(status))}</td>'
+        "</tr>"
+        for host_name, status in issues
+    )
+    return (
+        '<section class="dashboard-card">'
+        "<table>"
+        "<thead><tr><th>Host</th><th>Status</th></tr></thead>"
+        f"<tbody>{rows}</tbody>"
+        "</table>"
+        "</section>"
+    )
+
+
+def render_dashboard_service_issues(services: dict[str, Any]) -> str:
+    grouped_rows: list[tuple[str, str, str, str]] = []
+    for host_name, service_name, status in flatten_services(services):
+        if isinstance(status, dict):
+            status_text = status_text_from_record("service", status)
+            status_info = ""
+            for key in ("plugin_output", "status_information", "output", "long_plugin_output"):
+                value = status.get(key)
+                if isinstance(value, str) and value:
+                    status_info = value
+                    break
+        else:
+            status_text = str(status)
+            status_info = ""
+
+        if status_text.lower() == "ok":
+            continue
+        grouped_rows.append((host_name or "Unassigned", service_name, status_text, status_info))
+
+    if not grouped_rows:
+        return ""
+
+    grouped_rows.sort(key=lambda item: (item[0].lower(), item[1].lower()))
+    counts: dict[str, int] = {}
+    for host_name, _, _, _ in grouped_rows:
+        counts[host_name] = counts.get(host_name, 0) + 1
+
+    seen_hosts: set[str] = set()
+    rows = []
+    for host_name, service_name, status_text, status_info in grouped_rows:
+        cells = ["<tr>"]
+        if host_name not in seen_hosts:
+            host_link = (
+                html.escape(host_name)
+                if host_name == "Unassigned"
+                else f'<a href="/browse/hosts/{quote(host_name, safe="")}">{html.escape(host_name)}</a>'
+            )
+            cells.append(f'<td rowspan="{counts[host_name]}" class="group-host">{host_link}</td>')
+            seen_hosts.add(host_name)
+        cells.append(
+            f'<td><a href="/browse/services/{quote(host_name, safe="")}/{quote(service_name, safe="")}">{html.escape(service_name)}</a></td>'
+        )
+        cells.append(f'<td class="status {html.escape(status_text.lower())}">{html.escape(status_text)}</td>')
+        cells.append(f"<td>{html.escape(status_info)}</td>")
+        cells.append("</tr>")
+        rows.append("".join(cells))
+
+    return (
+        '<section class="dashboard-card dashboard-service-card">'
+        "<table>"
+        "<thead><tr><th>Host</th><th>Service</th><th>Status</th><th>Status Information</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody>"
+        "</table>"
+        "</section>"
     )
 
 
@@ -714,43 +805,21 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index(
-    sort: str = Query(default="path"),
-    dir: str = Query(default="asc"),
-) -> HTMLResponse:
-    reverse = dir == "desc"
-    rows_data = list(INDEX_ROUTES)
-    if sort == "description":
-        rows_data.sort(key=lambda item: item[1].lower(), reverse=reverse)
-    else:
-        rows_data.sort(key=lambda item: item[0].lower(), reverse=reverse)
-
-    rows = "".join(
-        f'<tr><td><a href="{path}">{path}</a></td><td>{description}</td></tr>'
-        for path, description in rows_data
+async def index() -> HTMLResponse:
+    nagios: NagiosClient = app.state.nagios
+    hosts_payload = await nagios.get_statusjson({"query": "hostlist"})
+    services_payload = await nagios.get_statusjson({"query": "servicelist"})
+    hostlist = hosts_payload.data.get("hostlist", {})
+    servicelist = services_payload.data.get("servicelist", {})
+    host_issues = render_dashboard_host_issues(hostlist)
+    service_issues = render_dashboard_service_issues(servicelist)
+    body = (
+        f"{host_issues}"
+        f"{service_issues}"
+        if host_issues or service_issues
+        else '<section class="dashboard-card"><p>All hosts and services are healthy.</p></section>'
     )
-    content = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Nagios Status API</title>
-  <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
-  <h1>Nagios Status API</h1>
-  <table>
-    <thead>
-      <tr>
-        <th>Path {build_sort_links("/", "path", sort, dir)}</th>
-        <th>Description {build_sort_links("/", "description", sort, dir)}</th>
-      </tr>
-    </thead>
-    <tbody>{rows}</tbody>
-  </table>
-  <script src="/static/app.js"></script>
-</body>
-</html>"""
-    return HTMLResponse(content=content)
+    return html_page("Nagios Status API", body)
 
 
 @app.get("/browse/hosts", response_class=HTMLResponse)
@@ -781,10 +850,9 @@ async def browse_host(
     host_path = f"/browse/hosts/{quote(host_name, safe='')}"
     body = (
         f"<h1>{html.escape(host_name)}</h1>"
-        '<p><a href="/browse/hosts">Back to hosts</a></p>'
         f'<p>Status: <span class="status {html.escape(str(status_text))}">{html.escape(str(status_text))}</span></p>'
-        f"{render_key_value_rows(host_data, sort, dir, host_path)}"
         f"{render_host_services_table(host_name, host_services)}"
+        f"{render_key_value_rows(host_data, sort, dir, host_path)}"
         f"<details><summary>Raw JSON</summary><pre>{html.escape(payload.model_dump_json(indent=2))}</pre></details>"
     )
     return html_page(f"Host {host_name}", body)
@@ -825,7 +893,6 @@ async def browse_service(
     body = (
         f"<h1>{html.escape(service_description)}</h1>"
         f'<p>Host: <a href="/browse/hosts/{quote(host_name, safe="")}">{html.escape(host_name)}</a></p>'
-        '<p><a href="/browse/services">Back to services</a></p>'
         f'<p>Status: <span class="status {html.escape(str(status_text))}">{html.escape(str(status_text))}</span></p>'
         f"{render_key_value_rows(service_data, sort, dir, service_path)}"
         f"<details><summary>Raw JSON</summary><pre>{html.escape(payload.model_dump_json(indent=2))}</pre></details>"

@@ -114,19 +114,65 @@ async def test_get_statusjson_connection_error_includes_backend_url() -> None:
 
 @pytest.mark.anyio
 async def test_index_lists_available_routes_as_html_table() -> None:
+    class FakeNagios:
+        async def get_statusjson(self, params: dict[str, str]) -> StatusJson:
+            if params == {"query": "hostlist"}:
+                return StatusJson.model_validate(
+                    {
+                        "format_version": "1.0",
+                        "data": {
+                            "hostlist": {
+                                "db01": "up",
+                                "db02": "down",
+                            }
+                        },
+                        "result": None,
+                    }
+                )
+
+            assert params == {"query": "servicelist"}
+            return StatusJson.model_validate(
+                {
+                    "format_version": "1.0",
+                    "data": {
+                        "servicelist": {
+                            "db01": {
+                                "PING": "ok",
+                                "Disk Space": "warning",
+                            },
+                            "db02": {
+                                "HTTP": "critical",
+                            },
+                        }
+                    },
+                    "result": None,
+                }
+            )
+
+    app.state.nagios = FakeNagios()
+
     response = await index()
     body = str(response.body)
 
     assert response.media_type == "text/html"
-    assert "<table>" in body
     assert "/static/styles.css" in body
     assert "/static/app.js" in body
-    assert "/?sort=path&amp;dir=asc" in body or "/?sort=path&dir=asc" in body
-    assert "/browse/hosts" in body
-    assert "/browse/services" in body
-    assert "/api/v1/programstatus" in body
-    assert "Nagios program status" in body
-    assert "/api/v1/services" in body
+    assert 'href="/">Home<' in body
+    assert 'href="/browse/hosts">Hosts<' in body
+    assert 'href="/browse/services">Services<' in body
+    assert 'href="/docs">Docs<' in body
+    assert 'href="/healthz">Healthz<' in body
+    assert "Host Issues" not in body
+    assert "Service Issues" not in body
+    assert "Current dashboard view of non-healthy hosts and services." not in body
+    assert "/browse/hosts/db02" in body
+    assert ">db01</a></td><td class=\"status up\">up<" not in body
+    assert "/browse/services/db01/Disk%20Space" in body
+    assert "/browse/services/db01/PING" not in body
+    assert "/browse/services/db02/HTTP" in body
+    assert "Status Information" in body
+    assert "/api/v1/programstatus" not in body
+    assert "/api/v1/services" not in body
 
 
 @pytest.mark.anyio
@@ -306,6 +352,7 @@ async def test_browse_host_renders_status_page(monkeypatch: pytest.MonkeyPatch) 
 
     assert "db01" in body
     assert "Status:" in body
+    assert "Back to hosts" not in body
     assert (
         "/browse/hosts/db01?sort=field&amp;dir=asc" in body
         or "/browse/hosts/db01?sort=field&dir=asc" in body
@@ -318,6 +365,7 @@ async def test_browse_host_renders_status_page(monkeypatch: pytest.MonkeyPatch) 
     assert "<details><summary>Raw JSON</summary>" in body
     assert "/static/styles.css" in body
     assert "/static/app.js" in body
+    assert 'href="/browse/services">Services<' in body
     assert seen_params == [
         {"query": "host", "hostname": "db01"},
         {"query": "servicelist", "hostname": "db01"},
@@ -454,6 +502,7 @@ async def test_browse_service_renders_status_page() -> None:
 
     assert "Disk Space" in body
     assert "/browse/hosts/db01" in body
+    assert "Back to services" not in body
     assert (
         "/browse/services/db01/Disk%20Space?sort=field&amp;dir=asc" in body
         or "/browse/services/db01/Disk%20Space?sort=field&dir=asc" in body
