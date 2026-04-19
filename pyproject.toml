@@ -21,7 +21,7 @@ nagios-status-api-server = "nagios_status_api:serve"
 
 [dependency-groups]
 dev = [
-    "pytest>=9.0.2",
+    "pytest>=9.0.3",
     "ruff>=0.15.6",
     "ty>=0.0.23",
 ]
